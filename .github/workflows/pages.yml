@@ -31,11 +31,9 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      # Pages muss einmalig unter Settings -> Pages mit der Quelle "GitHub Actions"
+      # eingeschaltet werden. Der Workflow-Token darf das nicht selbst tun.
       - uses: actions/configure-pages@v5
-        with:
-          # Schaltet Pages beim ersten Lauf selbst ein, statt einen Klick in den
-          # Repo-Einstellungen zu verlangen.
-          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: .
