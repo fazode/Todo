@@ -38,6 +38,7 @@
     <label class="switch"><input type="checkbox" id="opt-autosplit" checked><span>Sätze automatisch in einzelne Aufgaben trennen</span></label>
     <label class="switch"><input type="checkbox" id="opt-fillers" checked><span>Füllwörter entfernen („äh“, „ähm“ …)</span></label>
     <label class="switch"><input type="checkbox" id="opt-continuous" checked><span>Weiter zuhören, bis ich stoppe</span></label>
+    <label class="switch"><input type="checkbox" id="opt-due" checked><span>Zeitangaben übernehmen („morgen um 9“, „in zwei Stunden“)</span></label>
     <label class="field"><span>Sprache</span>
       <select id="opt-lang">
         <option value="de-DE">Deutsch (DE)</option>
@@ -47,6 +48,13 @@
         <option value="en-GB">English (UK)</option>
       </select>
     </label>
+  </fieldset>
+  <fieldset class="menu-group">
+    <legend>Erinnerungen</legend>
+    <p id="notify-state" class="hint"></p>
+    <div class="menu-buttons">
+      <button type="button" id="btn-notify" class="btn">Benachrichtigungen erlauben</button>
+    </div>
   </fieldset>
   <fieldset class="menu-group">
     <legend>Daten</legend>
@@ -99,6 +107,31 @@
     <p id="empty" class="empty" hidden>Noch nichts notiert. Sprich einfach los, der Rest kann bis morgen warten.</p>
   </section>
 </main>
+
+<dialog id="due-dialog" class="dialog">
+  <form method="dialog" class="dialog-form">
+    <h2 class="dialog-title">Wann soll ich erinnern?</h2>
+    <p id="due-task" class="dialog-task"></p>
+
+    <div class="quick" role="group" aria-label="Schnellauswahl">
+      <button type="button" class="chip" data-quick="60">In 1 Stunde</button>
+      <button type="button" class="chip" data-quick="evening">Heute 19:00</button>
+      <button type="button" class="chip" data-quick="tomorrow-8">Morgen 08:00</button>
+      <button type="button" class="chip" data-quick="tomorrow-18">Morgen 18:00</button>
+    </div>
+
+    <label class="field field-stacked" for="due-custom">
+      <span>Eigener Zeitpunkt</span>
+      <input type="datetime-local" id="due-custom">
+    </label>
+
+    <div class="dialog-actions">
+      <button type="submit" class="btn" value="cancel">Abbrechen</button>
+      <button type="submit" class="btn btn-danger" value="clear" id="due-clear">Erinnerung entfernen</button>
+      <button type="submit" class="btn btn-primary" value="save">Speichern</button>
+    </div>
+  </form>
+</dialog>
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden>
   <span id="toast-text"></span>

@@ -4,7 +4,7 @@
  * Liste, Eingabe und Bearbeiten funktionieren aber auch ohne.
  */
 
-const CACHE = 'nachtnotiz-v1';
+const CACHE = 'nachtnotiz-v2';
 
 const ASSETS = [
   './',
@@ -15,6 +15,8 @@ const ASSETS = [
   './src/js/store.js',
   './src/js/speech.js',
   './src/js/parse.js',
+  './src/js/datetime.js',
+  './src/js/reminders.js',
   './icons/icon.svg',
   './icons/icon-192.png',
   './icons/apple-touch-icon.png',
@@ -50,5 +52,17 @@ self.addEventListener('fetch', (event) => {
         return response;
       })
       .catch(() => caches.match(request).then((hit) => hit || caches.match('./index.html'))),
+  );
+});
+
+// Tippt jemand auf eine Erinnerung, soll die Liste in den Vordergrund.
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      const open = clients.find((client) => 'focus' in client);
+      if (open) return open.focus();
+      return self.clients.openWindow('./index.html');
+    }),
   );
 });

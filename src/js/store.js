@@ -12,6 +12,7 @@ const DEFAULT_SETTINGS = {
   fillers: true,
   continuous: true,
   lang: 'de-DE',
+  dueFromSpeech: true,
   filter: 'open',
   dimmed: false,
 };
@@ -66,6 +67,8 @@ export function normalizeTask(raw) {
     flagged: Boolean(raw.flagged),
     createdAt: Number.isFinite(raw.createdAt) ? raw.createdAt : Date.now(),
     doneAt: Number.isFinite(raw.doneAt) ? raw.doneAt : null,
+    dueAt: Number.isFinite(raw.dueAt) ? raw.dueAt : null,
+    notifiedAt: Number.isFinite(raw.notifiedAt) ? raw.notifiedAt : null,
     source: raw.source === 'voice' ? 'voice' : 'typed',
   };
 }
@@ -80,8 +83,8 @@ export function saveTasks(tasks) {
   return write(TASK_KEY, tasks);
 }
 
-export function createTask(text, source = 'typed') {
-  return normalizeTask({ text, source, createdAt: Date.now() });
+export function createTask(text, source = 'typed', dueAt = null) {
+  return normalizeTask({ text, source, dueAt, createdAt: Date.now() });
 }
 
 export function loadSettings() {

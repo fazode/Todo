@@ -6,6 +6,8 @@
 
 import { loadTasks, saveTasks, createTask, loadSettings, saveSettings, normalizeTask } from './store.js';
 import { toTasks, formatTime } from './parse.js';
+import { extractDue, formatDue, toInputValue } from './datetime.js';
+import * as reminders from './reminders.js';
 import { createDictation, isSupported } from './speech.js';
 
 const $ = (selector) => document.querySelector(selector);
@@ -31,6 +33,14 @@ const el = {
   optFillers: $('#opt-fillers'),
   optContinuous: $('#opt-continuous'),
   optLang: $('#opt-lang'),
+  optDue: $('#opt-due'),
+  notifyBtn: $('#btn-notify'),
+  notifyState: $('#notify-state'),
+  dueDialog: $('#due-dialog'),
+  dueTask: $('#due-task'),
+  dueCustom: $('#due-custom'),
+  dueClear: $('#due-clear'),
+  quickButtons: document.querySelectorAll('[data-quick]'),
   fileImport: $('#file-import'),
 };
 
@@ -39,6 +49,7 @@ let settings = loadSettings();
 let toastTimer = null;
 let undoAction = null;
 let wakeLock = null;
+let dueTarget = null;
 
 /* ---------------------------------------------------------------- Zustand */
 
@@ -55,13 +66,19 @@ function visibleTasks() {
 }
 
 function addTexts(texts, source) {
-  const fresh = texts.map((text) => createTask(text, source)).filter(Boolean);
+  const fresh = texts
+    .map((text) => (settings.dueFromSpeech ? extractDue(text) : { text, dueAt: null }))
+    .map(({ text, dueAt }) => createTask(text, source, dueAt))
+    .filter(Boolean);
   if (!fresh.length) return 0;
 
   // Neues kommt nach oben, innerhalb eines Diktats bleibt die Reihenfolge des Gesagten.
   tasks = [...fresh, ...tasks];
   persist();
   render();
+
+  const withDue = fresh.filter((task) => task.dueAt);
+  if (withDue.length) ensureRemindersFor(withDue);
   return fresh.length;
 }
 
@@ -118,9 +135,27 @@ function renderItem(task) {
 
   body.append(text, meta);
 
+  if (task.dueAt) {
+    const overdue = !task.done && task.dueAt <= Date.now();
+    const due = document.createElement('button');
+    due.type = 'button';
+    due.className = `due-chip${overdue ? ' is-overdue' : ''}`;
+    due.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 16v-5a6 6 0 1 0-12 0v5l-2 3h16l-2-3M10 22h4"/></svg>`;
+    due.append(document.createTextNode(`${overdue ? 'überfällig, ' : ''}${formatDue(task.dueAt)}`));
+    due.title = 'Erinnerung ändern';
+    due.addEventListener('click', () => openDueDialog(task.id));
+    body.append(due);
+  }
+
   const actions = document.createElement('div');
   actions.className = 'item-actions';
   actions.append(
+    iconButton(
+      task.dueAt ? 'Erinnerung ändern' : 'Erinnerung setzen',
+      '<path d="M18 16v-5a6 6 0 1 0-12 0v5l-2 3h16l-2-3M10 22h4"/>',
+      () => openDueDialog(task.id),
+      Boolean(task.dueAt),
+    ),
     iconButton(
       task.flagged ? 'Markierung entfernen' : 'Als wichtig markieren',
       '<path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.7l5.9-.9z"/>',
@@ -185,14 +220,113 @@ function toggleDone(id) {
   persist();
   render();
 
+  // Erledigtes soll nachts nicht mehr klingeln.
+  if (task.done) reminders.cancel(task.id);
+  else if (task.dueAt) reminders.schedule(task);
+
   if (task.done) {
     showToast('Erledigt.', () => {
       task.done = false;
       task.doneAt = null;
       persist();
       render();
+      if (task.dueAt) reminders.schedule(task);
       hideToast();
     });
+  }
+}
+
+/* ---------------------------------------------------------- Erinnerungen */
+
+function updateNotifyState() {
+  const state = reminders.permission();
+  const ahead = reminders.canScheduleAhead;
+
+  if (!reminders.canNotify) {
+    el.notifyState.textContent = 'Dieser Browser kennt keine Benachrichtigungen. Fällige Aufgaben werden beim Öffnen der App oben hervorgehoben.';
+  } else if (state === 'granted') {
+    el.notifyState.textContent = ahead
+      ? 'Benachrichtigungen sind erlaubt. Der Browser meldet sich auch bei geschlossener App.'
+      : 'Benachrichtigungen sind erlaubt. Sie erscheinen, solange die App läuft; verpasste Fälligkeiten kommen beim nächsten Öffnen.';
+  } else if (state === 'denied') {
+    el.notifyState.textContent = 'Benachrichtigungen sind blockiert. Du kannst sie in den Seiteneinstellungen des Browsers wieder erlauben.';
+  } else {
+    el.notifyState.textContent = 'Noch nicht erlaubt. Ohne Erlaubnis siehst du fällige Aufgaben nur in der Liste.';
+  }
+
+  el.notifyBtn.hidden = !reminders.canNotify || state !== 'default';
+}
+
+/** Erlaubnis einholen (nur wenn nötig) und die Meldungen beim Browser vormerken. */
+async function ensureRemindersFor(newTasks) {
+  const granted = await reminders.ensurePermission();
+  updateNotifyState();
+
+  if (!granted) {
+    showToast('Termin gespeichert, Benachrichtigungen sind aber nicht erlaubt.');
+    return;
+  }
+  await Promise.all(newTasks.map(reminders.schedule));
+}
+
+function checkDueTasks() {
+  const overdue = reminders.findDue(tasks);
+  if (!overdue.length) return;
+
+  overdue.forEach((task) => {
+    task.notifiedAt = Date.now();
+    reminders.fire(task);
+  });
+  persist();
+  render();
+
+  if (reminders.permission() !== 'granted') {
+    showToast(overdue.length === 1 ? 'Eine Aufgabe ist fällig.' : `${overdue.length} Aufgaben sind fällig.`);
+  }
+}
+
+function openDueDialog(id) {
+  const task = tasks.find((entry) => entry.id === id);
+  if (!task) return;
+
+  dueTarget = id;
+  el.dueTask.textContent = task.text;
+  el.dueCustom.value = toInputValue(task.dueAt ?? Date.now() + 3_600_000);
+  el.dueClear.hidden = !task.dueAt;
+  el.dueDialog.showModal();
+}
+
+function quickTimestamp(kind) {
+  const date = new Date();
+  if (kind === '60') return date.getTime() + 3_600_000;
+
+  if (kind === 'evening') {
+    date.setHours(19, 0, 0, 0);
+    if (date.getTime() <= Date.now()) date.setDate(date.getDate() + 1);
+    return date.getTime();
+  }
+
+  const hour = kind === 'tomorrow-18' ? 18 : 8;
+  date.setDate(date.getDate() + 1);
+  date.setHours(hour, 0, 0, 0);
+  return date.getTime();
+}
+
+function setDue(id, dueAt) {
+  const task = tasks.find((entry) => entry.id === id);
+  if (!task) return;
+
+  task.dueAt = dueAt;
+  task.notifiedAt = null;
+  persist();
+  render();
+
+  if (dueAt) {
+    ensureRemindersFor([task]);
+    showToast(`Erinnerung ${formatDue(dueAt)}.`);
+  } else {
+    reminders.cancel(id);
+    showToast('Erinnerung entfernt.');
   }
 }
 
@@ -224,6 +358,7 @@ function removeTask(id) {
   if (index === -1) return;
 
   const [removed] = tasks.splice(index, 1);
+  reminders.cancel(removed.id);
   persist();
   render();
 
@@ -351,6 +486,7 @@ async function importJson(file) {
     tasks = [...fresh, ...tasks];
     persist();
     render();
+    reminders.syncAll(tasks);
     showToast(`${fresh.length} Aufgabe${fresh.length === 1 ? '' : 'n'} importiert.`);
   } catch {
     showToast('Die Datei ließ sich nicht lesen.');
@@ -386,6 +522,7 @@ function applySettings() {
   el.optAutosplit.checked = settings.autosplit;
   el.optFillers.checked = settings.fillers;
   el.optContinuous.checked = settings.continuous;
+  el.optDue.checked = settings.dueFromSpeech;
   el.optLang.value = settings.lang;
 
   document.body.classList.toggle('is-dimmed', settings.dimmed);
@@ -432,6 +569,41 @@ el.optAutosplit.addEventListener('change', () => updateSettings({ autosplit: el.
 el.optFillers.addEventListener('change', () => updateSettings({ fillers: el.optFillers.checked }));
 el.optContinuous.addEventListener('change', () => updateSettings({ continuous: el.optContinuous.checked }));
 el.optLang.addEventListener('change', () => updateSettings({ lang: el.optLang.value }));
+el.optDue.addEventListener('change', () => updateSettings({ dueFromSpeech: el.optDue.checked }));
+
+el.notifyBtn.addEventListener('click', async () => {
+  await reminders.ensurePermission();
+  updateNotifyState();
+  reminders.syncAll(tasks);
+});
+
+el.quickButtons.forEach((button) => {
+  button.addEventListener('click', () => {
+    const id = dueTarget;
+    el.dueDialog.close('quick');
+    setDue(id, quickTimestamp(button.dataset.quick));
+  });
+});
+
+el.dueDialog.addEventListener('close', () => {
+  const id = dueTarget;
+  const choice = el.dueDialog.returnValue;
+  dueTarget = null;
+  if (!id) return;
+
+  if (choice === 'clear') {
+    setDue(id, null);
+    return;
+  }
+  if (choice !== 'save') return;
+
+  const picked = new Date(el.dueCustom.value).getTime();
+  if (Number.isNaN(picked)) {
+    showToast('Kein gültiger Zeitpunkt.');
+    return;
+  }
+  setDue(id, picked);
+});
 
 $('#btn-export').addEventListener('click', exportJson);
 $('#btn-copy').addEventListener('click', copyAsText);
@@ -459,12 +631,23 @@ document.addEventListener('keydown', (event) => {
 // Im Hintergrund weiterzuhören kostet nur Akku.
 document.addEventListener('visibilitychange', () => {
   if (document.hidden && dictation.listening) dictation.stop();
+  // Zurück aus dem Hintergrund: verpasste Fälligkeiten nachreichen.
+  if (!document.hidden) {
+    checkDueTasks();
+    render();
+  }
 });
 
 /* ----------------------------------------------------------------- Start */
 
 applySettings();
 render();
+updateNotifyState();
+checkDueTasks();
+
+// Fällige Aufgaben im Minutentakt prüfen, solange die App offen ist.
+setInterval(checkDueTasks, 30_000);
+reminders.syncAll(tasks);
 
 if (!isSupported) {
   el.mic.disabled = true;
