@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Nachtnotiz">
+  <rect width="512" height="512" rx="112" fill="#0d0f13"/>
+  <g fill="none" stroke="#e0a458" stroke-width="30" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="207" y="108" width="98" height="170" rx="49" fill="#e0a458" stroke="none"/>
+    <path d="M148 250a108 108 0 0 0 216 0"/>
+    <path d="M256 358v54"/>
+    <path d="M196 412h120"/>
+  </g>
+</svg>
